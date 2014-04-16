@@ -32,6 +32,8 @@
 
 #import "GCDWebDAVServer.h"
 
+#import "GCDWebServerFunctions.h"
+
 #import "GCDWebServerDataRequest.h"
 #import "GCDWebServerFileRequest.h"
 
@@ -52,7 +54,6 @@ typedef NS_ENUM(NSInteger, DAVProperties) {
 @interface GCDWebDAVServer () {
 @private
   NSString* _uploadDirectory;
-  id<GCDWebDAVServerDelegate> __unsafe_unretained _delegate;
   NSArray* _allowedExtensions;
   BOOL _showHidden;
 }
@@ -100,9 +101,9 @@ static inline BOOL _IsMacFinder(GCDWebServerRequest* request) {
     return [GCDWebServerResponse response];
   }
   
-  if ([_delegate respondsToSelector:@selector(davServer:didDownloadFileAtPath:)]) {
+  if ([self.delegate respondsToSelector:@selector(davServer:didDownloadFileAtPath:)]) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [_delegate davServer:self didDownloadFileAtPath:absolutePath];
+      [self.delegate davServer:self didDownloadFileAtPath:absolutePath];
     });
   }
   return [GCDWebServerFileResponse responseWithFile:absolutePath];
@@ -143,9 +144,9 @@ static inline BOOL _IsMacFinder(GCDWebServerRequest* request) {
     return [GCDWebServerErrorResponse responseWithServerError:kGCDWebServerHTTPStatusCode_InternalServerError underlyingError:error message:@"Failed moving uploaded file to \"%@\"", relativePath];
   }
   
-  if ([_delegate respondsToSelector:@selector(davServer:didUploadFileAtPath:)]) {
+  if ([self.delegate respondsToSelector:@selector(davServer:didUploadFileAtPath:)]) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [_delegate davServer:self didUploadFileAtPath:absolutePath];
+      [self.delegate davServer:self didUploadFileAtPath:absolutePath];
     });
   }
   return [GCDWebServerResponse responseWithStatusCode:(existing ? kGCDWebServerHTTPStatusCode_NoContent : kGCDWebServerHTTPStatusCode_Created)];
@@ -178,9 +179,9 @@ static inline BOOL _IsMacFinder(GCDWebServerRequest* request) {
     return [GCDWebServerErrorResponse responseWithServerError:kGCDWebServerHTTPStatusCode_InternalServerError underlyingError:error message:@"Failed deleting \"%@\"", relativePath];
   }
   
-  if ([_delegate respondsToSelector:@selector(davServer:didDeleteItemAtPath:)]) {
+  if ([self.delegate respondsToSelector:@selector(davServer:didDeleteItemAtPath:)]) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [_delegate davServer:self didDeleteItemAtPath:absolutePath];
+      [self.delegate davServer:self didDeleteItemAtPath:absolutePath];
     });
   }
   return [GCDWebServerResponse responseWithStatusCode:kGCDWebServerHTTPStatusCode_NoContent];
@@ -214,10 +215,19 @@ static inline BOOL _IsMacFinder(GCDWebServerRequest* request) {
   if (![[NSFileManager defaultManager] createDirectoryAtPath:absolutePath withIntermediateDirectories:NO attributes:nil error:&error]) {
     return [GCDWebServerErrorResponse responseWithServerError:kGCDWebServerHTTPStatusCode_InternalServerError underlyingError:error message:@"Failed creating directory \"%@\"", relativePath];
   }
+#ifdef __GCDWEBSERVER_ENABLE_TESTING__
+  NSString* creationDateHeader = [request.headers objectForKey:@"X-GCDWebServer-CreationDate"];
+  if (creationDateHeader) {
+    NSDate* date = GCDWebServerParseISO8601(creationDateHeader);
+    if (!date || ![[NSFileManager defaultManager] setAttributes:@{NSFileCreationDate: date} ofItemAtPath:absolutePath error:&error]) {
+      return [GCDWebServerErrorResponse responseWithServerError:kGCDWebServerHTTPStatusCode_InternalServerError underlyingError:error message:@"Failed setting creation date for directory \"%@\"", relativePath];
+    }
+  }
+#endif
   
-  if ([_delegate respondsToSelector:@selector(davServer:didCreateDirectoryAtPath:)]) {
+  if ([self.delegate respondsToSelector:@selector(davServer:didCreateDirectoryAtPath:)]) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [_delegate davServer:self didCreateDirectoryAtPath:absolutePath];
+      [self.delegate davServer:self didCreateDirectoryAtPath:absolutePath];
     });
   }
   return [GCDWebServerResponse responseWithStatusCode:kGCDWebServerHTTPStatusCode_Created];
@@ -287,15 +297,15 @@ static inline BOOL _IsMacFinder(GCDWebServerRequest* request) {
   }
   
   if (isMove) {
-    if ([_delegate respondsToSelector:@selector(davServer:didMoveItemFromPath:toPath:)]) {
+    if ([self.delegate respondsToSelector:@selector(davServer:didMoveItemFromPath:toPath:)]) {
       dispatch_async(dispatch_get_main_queue(), ^{
-        [_delegate davServer:self didMoveItemFromPath:srcAbsolutePath toPath:dstAbsolutePath];
+        [self.delegate davServer:self didMoveItemFromPath:srcAbsolutePath toPath:dstAbsolutePath];
       });
     }
   } else {
-    if ([_delegate respondsToSelector:@selector(davServer:didCopyItemFromPath:toPath:)]) {
+    if ([self.delegate respondsToSelector:@selector(davServer:didCopyItemFromPath:toPath:)]) {
       dispatch_async(dispatch_get_main_queue(), ^{
-        [_delegate davServer:self didCopyItemFromPath:srcAbsolutePath toPath:dstAbsolutePath];
+        [self.delegate davServer:self didCopyItemFromPath:srcAbsolutePath toPath:dstAbsolutePath];
       });
     }
   }
@@ -335,19 +345,11 @@ static inline xmlNodePtr _XMLChildWithName(xmlNodePtr child, const xmlChar* name
       }
       
       if ((properties & kDAVProperty_CreationDate) && [attributes objectForKey:NSFileCreationDate]) {
-        NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
-        formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
-        formatter.timeZone = [NSTimeZone timeZoneWithName:@"GMT"];
-        formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'+00:00'";
-        [xmlString appendFormat:@"<D:creationdate>%@</D:creationdate>", [formatter stringFromDate:[attributes fileCreationDate]]];
+        [xmlString appendFormat:@"<D:creationdate>%@</D:creationdate>", GCDWebServerFormatISO8601([attributes fileCreationDate])];
       }
       
-      if ((properties & kDAVProperty_LastModified) && [attributes objectForKey:NSFileModificationDate]) {
-        NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
-        formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
-        formatter.timeZone = [NSTimeZone timeZoneWithName:@"GMT"];
-        formatter.dateFormat = @"EEE', 'd' 'MMM' 'yyyy' 'HH:mm:ss' GMT'";
-        [xmlString appendFormat:@"<D:getlastmodified>%@</D:getlastmodified>", [formatter stringFromDate:[attributes fileModificationDate]]];
+      if ((properties & kDAVProperty_LastModified) && isFile && [attributes objectForKey:NSFileModificationDate]) {  // Last modification date is not useful for directories as it changes implicitely and 'Last-Modified' header is not provided for directories anyway
+        [xmlString appendFormat:@"<D:getlastmodified>%@</D:getlastmodified>", GCDWebServerFormatRFC822([attributes fileModificationDate])];
       }
       
       if ((properties & kDAVProperty_ContentLength) && !isDirectory && [attributes objectForKey:NSFileSize]) {
@@ -360,6 +362,8 @@ static inline xmlNodePtr _XMLChildWithName(xmlNodePtr child, const xmlChar* name
       [xmlString appendString:@"</D:response>\n"];
     }
     CFRelease(escapedPath);
+  } else {
+    [self logError:@"Failed escaping path: %@", itemPath];
   }
 }
 
@@ -525,6 +529,12 @@ static inline xmlNodePtr _XMLChildWithName(xmlNodePtr child, const xmlChar* name
     return [GCDWebServerErrorResponse responseWithClientError:kGCDWebServerHTTPStatusCode_Forbidden message:@"Locking item name \"%@\" is not allowed", itemName];
   }
   
+#ifdef __GCDWEBSERVER_ENABLE_TESTING__
+  NSString* lockTokenHeader = [request.headers objectForKey:@"X-GCDWebServer-LockToken"];
+  if (lockTokenHeader) {
+    token = lockTokenHeader;
+  }
+#endif
   if (!token) {
     CFUUIDRef uuid = CFUUIDCreate(kCFAllocatorDefault);
     CFStringRef string = CFUUIDCreateString(kCFAllocatorDefault, uuid);
@@ -587,7 +597,7 @@ static inline xmlNodePtr _XMLChildWithName(xmlNodePtr child, const xmlChar* name
 
 @implementation GCDWebDAVServer
 
-@synthesize uploadDirectory=_uploadDirectory, delegate=_delegate, allowedFileExtensions=_allowedExtensions, showHiddenFiles=_showHidden;
+@synthesize uploadDirectory=_uploadDirectory, allowedFileExtensions=_allowedExtensions, showHiddenFiles=_showHidden;
 
 - (instancetype)initWithUploadDirectory:(NSString*)path {
   if ((self = [super init])) {

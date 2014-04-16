@@ -25,9 +25,11 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+var ENTER_KEYCODE = 13;
+
 var _path = null;
-var _reloading = false;
 var _pendingReloads = [];
+var _reloadingDisabled = 0;
 
 function formatFileSize(bytes) {
   if (bytes >= 1000000000) {
@@ -47,15 +49,27 @@ function _showError(message, textStatus, errorThrown) {
   }));
 }
 
+function _disableReloads() {
+  _reloadingDisabled += 1;
+}
+
+function _enableReloads() {
+  _reloadingDisabled -= 1;
+  
+  if (_pendingReloads.length > 0) {
+    _reload(_pendingReloads.shift());
+  }
+}
+
 function _reload(path) {
-  if (_reloading) {
+  if (_reloadingDisabled) {
     if ($.inArray(path, _pendingReloads) < 0) {
       _pendingReloads.push(path);
     }
     return;
   }
   
-  _reloading = true;
+  _disableReloads();
   $.ajax({
     url: 'list',
     type: 'GET',
@@ -64,6 +78,7 @@ function _reload(path) {
   }).fail(function(jqXHR, textStatus, errorThrown) {
     _showError("Failed retrieving contents of \"" + path + "\"", textStatus, errorThrown);
   }).done(function(data, textStatus, jqXHR) {
+    var scrollPosition = $(document).scrollTop();
     
     if (path != _path) {
       $("#path").empty();
@@ -77,7 +92,7 @@ function _reload(path) {
           $("#path").append('<li data-path="' + subpath + '"><a>' + components[i] + '</a></li>');
         }
         $("#path > li").click(function(event) {
-          _reload($(this).attr("data-path"));
+          _reload($(this).data("path"));
           event.preventDefault();
         });
         $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');
@@ -87,13 +102,13 @@ function _reload(path) {
     
     $("#listing").empty();
     for (var i = 0, file; file = data[i]; ++i) {
-      $("#listing").append(tmpl("template-listing", file));
+      $(tmpl("template-listing", file)).data(file).appendTo("#listing");
     }
     
     $(".edit").editable(function(value, settings) { 
-      var name = $(this).parent().parent().attr("data-name");
+      var name = $(this).parent().parent().data("name");
       if (value != name) {
-        var path = $(this).parent().parent().attr("data-path");
+        var path = $(this).parent().parent().data("path");
         $.ajax({
           url: 'move',
           type: 'POST',
@@ -107,33 +122,42 @@ function _reload(path) {
       }
       return value;
     }, {
+      onedit: function(settings, original) {
+        _disableReloads();
+      },
+      onsubmit: function(settings, original) {
+        _enableReloads();
+      },
+      onreset: function(settings, original) {
+        _enableReloads();
+      },
       tooltip: 'Click to rename...'
     });
     
     $(".button-download").click(function(event) {
-      var path = $(this).parent().parent().attr("data-path");
+      var path = $(this).parent().parent().data("path");
       setTimeout(function() {
         window.location = "download?path=" + encodeURIComponent(path);
       }, 0);
     });
     
     $(".button-open").click(function(event) {
-      var path = $(this).parent().parent().attr("data-path");
+      var path = $(this).parent().parent().data("path");
       _reload(path);
     });
     
     $(".button-move").click(function(event) {
-      var path = $(this).parent().parent().attr("data-path");
+      var path = $(this).parent().parent().data("path");
       if (path[path.length - 1] == "/") {
         path = path.slice(0, path.length - 1);
       }
-      $("#move-input").attr("data-path", path);
+      $("#move-input").data("path", path);
       $("#move-input").val(path);
       $("#move-modal").modal("show");
     });
     
     $(".button-delete").click(function(event) {
-      var path = $(this).parent().parent().attr("data-path");
+      var path = $(this).parent().parent().data("path");
       $.ajax({
         url: 'delete',
         type: 'POST',
@@ -146,11 +170,9 @@ function _reload(path) {
       });
     });
     
+    $(document).scrollTop(scrollPosition);
   }).always(function() {
-    _reloading = false;
-    if (_pendingReloads.length > 0) {
-      _reload(_pendingReloads.shift());
-    }
+    _enableReloads();
   });
 }
 
@@ -212,10 +234,16 @@ $(document).ready(function() {
     
   });
   
+  $("#create-input").keypress(function(event) {
+    if (event.keyCode == ENTER_KEYCODE) {
+      $("#create-confirm").click();
+    };
+  });
+  
   $("#create-modal").on("shown.bs.modal", function(event) {
     $("#create-input").focus();
     $("#create-input").select();
-  })
+  });
   
   $("#create-folder").click(function(event) {
     $("#create-input").val("Untitled folder");
@@ -239,6 +267,12 @@ $(document).ready(function() {
     }
   });
   
+  $("#move-input").keypress(function(event) {
+    if (event.keyCode == ENTER_KEYCODE) {
+      $("#move-confirm").click();
+    };
+  });
+  
   $("#move-modal").on("shown.bs.modal", function(event) {
     $("#move-input").focus();
     $("#move-input").select();
@@ -246,7 +280,7 @@ $(document).ready(function() {
   
   $("#move-confirm").click(function(event) {
     $("#move-modal").modal("hide");
-    var oldPath = $("#move-input").attr("data-path");
+    var oldPath = $("#move-input").data("path");
     var newPath = $("#move-input").val();
     if ((newPath != "") && (newPath[0] == "/") && (newPath != oldPath)) {
       $.ajax({

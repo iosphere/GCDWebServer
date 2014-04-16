@@ -7,7 +7,7 @@
 
 Pod::Spec.new do |s|
   s.name     = 'GCDWebServer'
-  s.version  = '2.0'
+  s.version  = '2.1.1'
   s.author   =  { 'Pierre-Olivier Latour' => 'info@pol-online.net' }
   s.license  = { :type => 'BSD', :file => 'LICENSE' }
   s.homepage = 'https://github.com/swisspol/GCDWebServer'
@@ -21,7 +21,7 @@ Pod::Spec.new do |s|
   s.default_subspec = 'Core'
   
   s.subspec 'Core' do |cs|
-    cs.source_files = 'CGDWebServer/*.{h,m}'
+    cs.source_files = 'GCDWebServer/**/*.{h,m}'
     cs.requires_arc = true
     cs.ios.library = 'z'
     cs.osx.library = 'z'

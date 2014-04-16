@@ -1,8 +1,10 @@
 Overview
 ========
 
-GCDWebServer is a lightweight GCD based HTTP 1.1 server designed to be embedded in Mac & iOS apps. It was written from scratch with the following goals in mind:
-* Easy to use and understand architecture with only 4 core classes: server, connection, request and response
+[![Build Status](https://travis-ci.org/swisspol/GCDWebServer.svg?branch=master)](https://travis-ci.org/swisspol/GCDWebServer)
+
+GCDWebServer is a modern and lightweight GCD based HTTP 1.1 server designed to be embedded in OS X & iOS apps. It was written from scratch with the following goals in mind:
+* Easy to use and understand architecture with only 4 core classes: server, connection, request and response (see "Understanding GCDWebServer's Architecture" below)
 * Well designed API for easy integration and customization
 * Entirely built with an event-driven design using [Grand Central Dispatch](http://en.wikipedia.org/wiki/Grand_Central_Dispatch) for maximal performance and concurrency
 * No dependencies on third-party source code
@@ -14,10 +16,11 @@ Extra built-in features:
 * [JSON](http://www.json.org/) parsing and serialization for request and response HTTP bodies
 * [Chunked transfer encoding](https://en.wikipedia.org/wiki/Chunked_transfer_encoding) for request and response HTTP bodies
 * [HTTP compression](https://en.wikipedia.org/wiki/HTTP_compression) with gzip for request and response HTTP bodies
+* [HTTP range](https://en.wikipedia.org/wiki/Byte_serving) support for requests of local files
 
 Included extensions:
-* [GCDWebUploader](GCDWebUploader/GCDWebUploader.h): subclass of GCDWebServer that implements an interface for uploading and downloading files from an iOS app's sandbox using a web browser
-* [GCDWebDAVServer](GCDWebDAVServer/GCDWebDAVServer.h): subclass of GCDWebServer that implements a class 1 [WebDAV](https://en.wikipedia.org/wiki/WebDAV) server (with partial class 2 support for OS X Finder)
+* [GCDWebUploader](GCDWebUploader/GCDWebUploader.h): subclass of ```GCDWebServer``` that implements an interface for uploading and downloading files from an iOS app's sandbox using a web browser
+* [GCDWebDAVServer](GCDWebDAVServer/GCDWebDAVServer.h): subclass of ```GCDWebServer``` that implements a class 1 [WebDAV](https://en.wikipedia.org/wiki/WebDAV) server (with partial class 2 support for OS X Finder)
 
 What's not available out of the box but can be implemented on top of the API:
 * Authentication like [Basic Authentication](https://en.wikipedia.org/wiki/Basic_access_authentication)
@@ -52,8 +55,9 @@ pod "GCDWebServer/WebDAV", "~> 2.0"
 Hello World
 ===========
 
-This code snippet shows how to implement a custom HTTP server that runs on port 8080 and returns a "Hello World" HTML page to any request &mdash; since GCDWebServer uses GCD blocks to handle requests, no subclassing or delegates are needed:
+These codes snippets show how to implement a custom HTTP server that runs on port 8080 and returns a "Hello World" HTML page to any request. Since GCDWebServer uses GCD blocks to handle requests, no subclassing or delegates are needed, which results in very clean code.
 
+**OS X version (command line tool):**
 ```objectivec
 #import "GCDWebServer.h"
 
@@ -63,7 +67,7 @@ int main(int argc, const char* argv[]) {
     // Create server
     GCDWebServer* webServer = [[GCDWebServer alloc] init];
     
-    // Add a handler to respond to requests on any URL
+    // Add a handler to respond to GET requests on any URL
     [webServer addDefaultHandlerForMethod:@"GET"
                              requestClass:[GCDWebServerRequest class]
                              processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
@@ -72,10 +76,10 @@ int main(int argc, const char* argv[]) {
       
     }];
     
-    // Use convenience method that runs server on port 8080 until SIGINT received
+    // Use convenience method that runs server on port 8080 until SIGINT received (i.e. Ctrl-C in Terminal)
     [webServer runWithPort:8080];
     
-    // Destroy server
+    // Destroy server (unnecessary if using ARC)
     [webServer release];
     
   }
@@ -83,21 +87,50 @@ int main(int argc, const char* argv[]) {
 }
 ```
 
+**iOS Version:**
+```objectivec
+#import "GCDWebServer.h"
+
+static GCDWebServer* _webServer = nil;  // This should really be an ivar of your application delegate class
+
+- (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
+  
+  // Create server
+  _webServer = [[GCDWebServer alloc] init];
+  
+  // Add a handler to respond to GET requests on any URL
+  [_webServer addDefaultHandlerForMethod:@"GET"
+                            requestClass:[GCDWebServerRequest class]
+                            processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
+    
+    return [GCDWebServerDataResponse responseWithHTML:@"<html><body><p>Hello World</p></body></html>"];
+    
+  }];
+  
+  // Start server on port 8080
+  [_webServer startWithPort:8080 bonjourName:nil];
+  
+  return YES;
+}
+```
+
 Web Based Uploads in iOS Apps
 =============================
 
-GCDWebUploader is a subclass of GCDWebServer that provides a ready-to-use HTML 5 file uploader & downloader. This lets users upload, download, delete files and create directories from a directory inside your iOS app's sandbox using a clean user interface in their web browser.
+GCDWebUploader is a subclass of ```GCDWebServer``` that provides a ready-to-use HTML 5 file uploader & downloader. This lets users upload, download, delete files and create directories from a directory inside your iOS app's sandbox using a clean user interface in their web browser.
 
 Simply instantiate and run a GCDWebUploader instance then visit http://{YOUR-IOS-DEVICE-IP-ADDRESS}/ from your web browser:
 
 ```objectivec
 #import "GCDWebUploader.h"
 
+static GCDWebUploader* _webUploader = nil;  // This should really be an ivar of your application delegate class
+
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   NSString* documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-  GCDWebUploader* webUploader = [[GCDWebUploader alloc] initWithUploadDirectory:documentsPath];
-  [webUploader start];
-  NSLog(@"Visit %@ in your web browser", webUploader.serverURL);
+  _webUploader = [[GCDWebUploader alloc] initWithUploadDirectory:documentsPath];
+  [_webUploader start];
+  NSLog(@"Visit %@ in your web browser", _webUploader.serverURL);
   return YES;
 }
 ```
@@ -105,7 +138,7 @@ Simply instantiate and run a GCDWebUploader instance then visit http://{YOUR-IOS
 WebDAV Server in iOS Apps
 =========================
 
-GCDWebDAVServer is a subclass of GCDWebServer that provides a class 1 compliant [WebDAV](https://en.wikipedia.org/wiki/WebDAV) server. This lets users upload, download, delete files and create directories from a directory inside your iOS app's sandbox using any WebDAV client like [Transmit](https://panic.com/transmit/) (Mac), [ForkLift](http://binarynights.com/forklift/) (Mac) or [CyberDuck](http://cyberduck.io/) (Mac / Windows).
+GCDWebDAVServer is a subclass of ```GCDWebServer``` that provides a class 1 compliant [WebDAV](https://en.wikipedia.org/wiki/WebDAV) server. This lets users upload, download, delete files and create directories from a directory inside your iOS app's sandbox using any WebDAV client like [Transmit](https://panic.com/transmit/) (Mac), [ForkLift](http://binarynights.com/forklift/) (Mac) or [CyberDuck](http://cyberduck.io/) (Mac / Windows).
 
 GCDWebDAVServer should also work with the [OS X Finder](http://support.apple.com/kb/PH13859) as it is partially class 2 compliant (but only when the client is the OS X WebDAV implementation).
 
@@ -114,11 +147,13 @@ Simply instantiate and run a GCDWebDAVServer instance then connect to http://{YO
 ```objectivec
 #import "GCDWebDAVServer.h"
 
+static GCDWebDAVServer* _davServer = nil;  // This should really be an ivar of your application delegate class
+
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   NSString* documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-  GCDWebDAVServer* davServer = [[GCDWebDAVServer alloc] initWithUploadDirectory:documentsPath];
-  [davServer start];
-  NSLog(@"Visit %@ in your WebDAV client", davServer.serverURL);
+  _davServer = [[GCDWebDAVServer alloc] initWithUploadDirectory:documentsPath];
+  [_davServer start];
+  NSLog(@"Visit %@ in your WebDAV client", _davServer.serverURL);
   return YES;
 }
 ```
@@ -126,7 +161,7 @@ Simply instantiate and run a GCDWebDAVServer instance then connect to http://{YO
 Serving a Static Website
 ========================
 
-GCDWebServer includes a built-in handler that can recursively serve a directory (it also lets you control how the "Cache-Control" header should be set):
+GCDWebServer includes a built-in handler that can recursively serve a directory (it also lets you control how the ["Cache-Control"](http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.9) header should be set):
 
 ```objectivec
 #import "GCDWebServer.h"
@@ -137,7 +172,7 @@ int main(int argc, const char* argv[]) {
     GCDWebServer* webServer = [[GCDWebServer alloc] init];
     [webServer addGETHandlerForBasePath:@"/" directoryPath:NSHomeDirectory() indexFilename:nil cacheAge:3600 allowRangeRequests:YES];
     [webServer runWithPort:8080];
-    [webServer release];
+    [webServer release];  // Remove if using ARC
     
   }
   return 0;
@@ -147,20 +182,20 @@ int main(int argc, const char* argv[]) {
 Using GCDWebServer
 ==================
 
-You start by creating an instance of the 'GCDWebServer' class. Note that you can have multiple web servers running in the same app as long as they listen on different ports.
+You start by creating an instance of the ```GCDWebServer``` class. Note that you can have multiple web servers running in the same app as long as they listen on different ports.
 
 Then you add one or more "handlers" to the server: each handler gets a chance to handle an incoming web request and provide a response. Handlers are called in a LIFO queue, so the latest added handler overrides any previously added ones.
 
 Finally you start the server on a given port.
 
-Understanding GCDWebServer Architecture
-=======================================
+Understanding GCDWebServer's Architecture
+=========================================
 
-GCDWebServer is made of only 4 core classes:
-* 'GCDWebServer' manages the socket that listens for new HTTP connections and the list of handlers used by the server.
-* 'GCDWebServerConnection' is instantiated by 'GCDWebServer' to handle each new HTTP connection. Each instance stays alive until the connection is closed. You cannot use this class directly, but it is exposed so you can subclass it to override some hooks.
-* 'GCDWebServerRequest' is created by the 'GCDWebServerConnection' instance after HTTP headers have been received. It wraps the request and handles the HTTP body if any. GCDWebServer comes with several subclasses of 'GCDWebServerRequest' to handle common cases like storing the body in memory or stream it to a file on disk. See [GCDWebServerRequest.h](CGDWebServer/GCDWebServerRequest.h) for the full list.
-* 'GCDWebServerResponse' is created by the request handler and wraps the response HTTP headers and optional body. GCDWebServer provides several subclasses of 'GCDWebServerResponse' to handle common cases like HTML text in memory or streaming a file from disk. See [GCDWebServerResponse.h](CGDWebServer/GCDWebServerResponse.h) for the full list.
+GCDWebServer's architecture consists of only 4 core classes:
+* [GCDWebServer](GCDWebServer/Core/GCDWebServer.h) manages the socket that listens for new HTTP connections and the list of handlers used by the server.
+* [GCDWebServerConnection](GCDWebServer/Core/GCDWebServerConnection.h) is instantiated by ```GCDWebServer``` to handle each new HTTP connection. Each instance stays alive until the connection is closed. You cannot use this class directly, but it is exposed so you can subclass it to override some hooks.
+* [GCDWebServerRequest](GCDWebServer/Core/GCDWebServerRequest.h) is created by the ```GCDWebServerConnection``` instance after HTTP headers have been received. It wraps the request and handles the HTTP body if any. GCDWebServer comes with [several subclasses](GCDWebServer/Requests) of ```GCDWebServerRequest``` to handle common cases like storing the body in memory or stream it to a file on disk.
+* [GCDWebServerResponse](GCDWebServer/Core/GCDWebServerResponse.h) is created by the request handler and wraps the response HTTP headers and optional body. GCDWebServer comes with [several subclasses](GCDWebServer/Responses) of ```GCDWebServerResponse``` to handle common cases like HTML text in memory or streaming a file from disk.
 
 Implementing Handlers
 =====================
@@ -168,15 +203,15 @@ Implementing Handlers
 GCDWebServer relies on "handlers" to process incoming web requests and generating responses. Handlers are implemented with GCD blocks which makes it very easy to provide your owns. However, they are executed on arbitrary threads within GCD so __special attention must be paid to thread-safety and re-entrancy__.
 
 Handlers require 2 GCD blocks:
-* The 'GCDWebServerMatchBlock' is called on every handler added to the 'GCDWebServer' instance whenever a web request has started (i.e. HTTP headers have been received). It is passed the basic info for the web request (HTTP method, URL, headers...) and must decide if it wants to handle it or not. If yes, it must return a 'GCDWebServerRequest' instance (see above). Otherwise, it simply returns nil.
-* The 'GCDWebServerProcessBlock' is called after the web request has been fully received and is passed the 'GCDWebServerRequest' instance created at the previous step. It must return a 'GCDWebServerResponse' instance (see above) or nil on error.
+* The ```GCDWebServerMatchBlock``` is called on every handler added to the ```GCDWebServer``` instance whenever a web request has started (i.e. HTTP headers have been received). It is passed the basic info for the web request (HTTP method, URL, headers...) and must decide if it wants to handle it or not. If yes, it must return a new ```GCDWebServerRequest``` instance (see above) created with this info. Otherwise, it simply returns nil.
+* The ```GCDWebServerProcessBlock``` is called after the web request has been fully received and is passed the ```GCDWebServerRequest``` instance created at the previous step. It must return a ```GCDWebServerResponse``` instance (see above) or nil on error, which will result in a 500 HTTP status code returned to the client. It's however recommended to return an instance of [GCDWebServerErrorResponse](GCDWebServer/Responses/GCDWebServerErrorResponse.h) on error so more useful information can be returned to the client.
 
-Note that most methods on 'GCDWebServer' to add handlers only require the 'GCDWebServerProcessBlock' as they already provide a built-in 'GCDWebServerMatchBlock' e.g. to match a URL path with a Regex.
+Note that most methods on ```GCDWebServer``` to add handlers only require the ```GCDWebServerProcessBlock``` as they already provide a built-in ```GCDWebServerMatchBlock``` e.g. to match a URL path with a Regex.
 
 Advanced Example 1: Implementing HTTP Redirects
 ===============================================
 
-Here's an example handler that redirects "/" to "/index.html" using the convenience method on 'GCDWebServerResponse' (it sets the HTTP status code and 'Location' header automatically):
+Here's an example handler that redirects "/" to "/index.html" using the convenience method on ```GCDWebServerResponse``` (it sets the HTTP status code and "Location" header automatically):
 
 ```objectivec
 [self addHandlerForMethod:@"GET"
@@ -194,8 +229,8 @@ Advanced Example 2: Implementing Forms
 ======================================
 
 To implement an HTTP form, you need a pair of handlers:
-* The GET handler does not expect any body in the HTTP request and therefore uses the 'GCDWebServerRequest' class. The handler generates a response containing a simple HTML form.
-* The POST handler expects the form values to be in the body of the HTTP request and percent-encoded. Fortunately, GCDWebServer provides the request class 'GCDWebServerURLEncodedFormRequest' which can automatically parse such bodies. The handler simply echoes back the value from the user submitted form.
+* The GET handler does not expect any body in the HTTP request and therefore uses the ```GCDWebServerRequest``` class. The handler generates a response containing a simple HTML form.
+* The POST handler expects the form values to be in the body of the HTTP request and percent-encoded. Fortunately, GCDWebServer provides the request class ```GCDWebServerURLEncodedFormRequest``` which can automatically parse such bodies. The handler simply echoes back the value from the user submitted form.
 
 ```objectivec
 [webServer addHandlerForMethod:@"GET"
@@ -230,7 +265,7 @@ To implement an HTTP form, you need a pair of handlers:
 Advanced Example 3: Serving a Dynamic Website
 =============================================
 
-GCDWebServer provides an extension to the 'GCDWebServerDataResponse' class that can return HTML content generated from a template and a set of variables (using the format '%variable%'). It is a very basic template system and is really intended as a starting point to building more advanced template systems by subclassing 'GCDWebServerResponse'.
+GCDWebServer provides an extension to the ```GCDWebServerDataResponse``` class that can return HTML content generated from a template and a set of variables (using the format ```%variable%```). It is a very basic template system and is really intended as a starting point to building more advanced template systems by subclassing ```GCDWebServerResponse```.
 
 Assuming you have a website directory in your app containing HTML template files along with the corresponding CSS, scripts and images, it's pretty easy to turn it into a dynamic website:
 
