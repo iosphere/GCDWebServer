@@ -343,7 +343,9 @@ static NSData* _dashNewlineData = nil;
 - (BOOL)writeData:(NSData*)data error:(NSError**)error {
   [_parserData appendBytes:data.bytes length:data.length];
   if (![self _parseData]) {
-    *error = [NSError errorWithDomain:kGCDWebServerErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed parsing multipart form data"}];
+    if (error) {
+      *error = [NSError errorWithDomain:kGCDWebServerErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed parsing multipart form data"}];
+    }
     return NO;
   }
   return YES;
@@ -366,7 +368,9 @@ static NSData* _dashNewlineData = nil;
   ARC_RELEASE(_tmpPath);
   _tmpPath = nil;
   if (_parserState != kParserState_End) {
-    *error = [NSError errorWithDomain:kGCDWebServerErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed parsing multipart form data"}];
+    if (error) {
+      *error = [NSError errorWithDomain:kGCDWebServerErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed parsing multipart form data"}];
+    }
     return NO;
   }
   return YES;
