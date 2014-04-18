@@ -17,14 +17,12 @@ Extra built-in features:
 * [Chunked transfer encoding](https://en.wikipedia.org/wiki/Chunked_transfer_encoding) for request and response HTTP bodies
 * [HTTP compression](https://en.wikipedia.org/wiki/HTTP_compression) with gzip for request and response HTTP bodies
 * [HTTP range](https://en.wikipedia.org/wiki/Byte_serving) support for requests of local files
+* [Basic](https://en.wikipedia.org/wiki/Basic_access_authentication) and [Digest Access](https://en.wikipedia.org/wiki/Digest_access_authentication) authentications for password protection
+* Automatically handle transitions between foreground, background and suspended modes in iOS apps
 
 Included extensions:
-* [GCDWebUploader](GCDWebUploader/GCDWebUploader.h): subclass of ```GCDWebServer``` that implements an interface for uploading and downloading files from an iOS app's sandbox using a web browser
+* [GCDWebUploader](GCDWebUploader/GCDWebUploader.h): subclass of ```GCDWebServer``` that implements an interface for uploading and downloading files using a web browser
 * [GCDWebDAVServer](GCDWebDAVServer/GCDWebDAVServer.h): subclass of ```GCDWebServer``` that implements a class 1 [WebDAV](https://en.wikipedia.org/wiki/WebDAV) server (with partial class 2 support for OS X Finder)
-
-What's not available out of the box but can be implemented on top of the API:
-* Authentication like [Basic Authentication](https://en.wikipedia.org/wiki/Basic_access_authentication)
-* Web forms submitted using "multipart/mixed"
 
 What's not supported (but not really required from an embedded HTTP server):
 * Keep-alive connections
@@ -37,7 +35,7 @@ Requirements:
 Getting Started
 ===============
 
-Download or checkout the source for GCDWebServer then add the entire "GCDWebServer" subfolder to your Xcode project. If you intend to use one of the extensions like GCDWebDAVServer or GCDWebUploader, add these subfolders as well.
+Download or check out the [latest release](https://github.com/swisspol/GCDWebServer/releases) of GCDWebServer then add the entire "GCDWebServer" subfolder to your Xcode project. If you intend to use one of the extensions like GCDWebDAVServer or GCDWebUploader, add these subfolders as well.
 
 Alternatively, you can install GCDWebServer using [CocoaPods](http://cocoapods.org/) by simply adding this line to your Xcode project's Podfile:
 ```
@@ -55,7 +53,7 @@ pod "GCDWebServer/WebDAV", "~> 2.0"
 Hello World
 ===========
 
-These codes snippets show how to implement a custom HTTP server that runs on port 8080 and returns a "Hello World" HTML page to any request. Since GCDWebServer uses GCD blocks to handle requests, no subclassing or delegates are needed, which results in very clean code.
+These code snippets show how to implement a custom HTTP server that runs on port 8080 and returns a "Hello World" HTML page to any request. Since GCDWebServer uses GCD blocks to handle requests, no subclassing or delegates are needed, which results in very clean code.
 
 **OS X version (command line tool):**
 ```objectivec
@@ -87,11 +85,11 @@ int main(int argc, const char* argv[]) {
 }
 ```
 
-**iOS Version:**
+**iOS version:**
 ```objectivec
 #import "GCDWebServer.h"
 
-static GCDWebServer* _webServer = nil;  // This should really be an ivar of your application delegate class
+static GCDWebServer* _webServer = nil;  // This should really be an ivar of your application's delegate class
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   
@@ -119,12 +117,12 @@ Web Based Uploads in iOS Apps
 
 GCDWebUploader is a subclass of ```GCDWebServer``` that provides a ready-to-use HTML 5 file uploader & downloader. This lets users upload, download, delete files and create directories from a directory inside your iOS app's sandbox using a clean user interface in their web browser.
 
-Simply instantiate and run a GCDWebUploader instance then visit http://{YOUR-IOS-DEVICE-IP-ADDRESS}/ from your web browser:
+Simply instantiate and run a ```GCDWebUploader``` instance then visit ```http://{YOUR-IOS-DEVICE-IP-ADDRESS}/``` from your web browser:
 
 ```objectivec
 #import "GCDWebUploader.h"
 
-static GCDWebUploader* _webUploader = nil;  // This should really be an ivar of your application delegate class
+static GCDWebUploader* _webUploader = nil;  // This should really be an ivar of your application's delegate class
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   NSString* documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
@@ -142,12 +140,12 @@ GCDWebDAVServer is a subclass of ```GCDWebServer``` that provides a class 1 comp
 
 GCDWebDAVServer should also work with the [OS X Finder](http://support.apple.com/kb/PH13859) as it is partially class 2 compliant (but only when the client is the OS X WebDAV implementation).
 
-Simply instantiate and run a GCDWebDAVServer instance then connect to http://{YOUR-IOS-DEVICE-IP-ADDRESS}/ using a WebDAV client:
+Simply instantiate and run a ```GCDWebDAVServer``` instance then connect to ```http://{YOUR-IOS-DEVICE-IP-ADDRESS}/``` using a WebDAV client:
 
 ```objectivec
 #import "GCDWebDAVServer.h"
 
-static GCDWebDAVServer* _davServer = nil;  // This should really be an ivar of your application delegate class
+static GCDWebDAVServer* _davServer = nil;  // This should really be an ivar of your application's delegate class
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
   NSString* documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
@@ -207,6 +205,20 @@ Handlers require 2 GCD blocks:
 * The ```GCDWebServerProcessBlock``` is called after the web request has been fully received and is passed the ```GCDWebServerRequest``` instance created at the previous step. It must return a ```GCDWebServerResponse``` instance (see above) or nil on error, which will result in a 500 HTTP status code returned to the client. It's however recommended to return an instance of [GCDWebServerErrorResponse](GCDWebServer/Responses/GCDWebServerErrorResponse.h) on error so more useful information can be returned to the client.
 
 Note that most methods on ```GCDWebServer``` to add handlers only require the ```GCDWebServerProcessBlock``` as they already provide a built-in ```GCDWebServerMatchBlock``` e.g. to match a URL path with a Regex.
+
+GCDWebServer & Background Mode for iOS Apps
+===========================================
+
+When doing networking operations in iOS apps, you must handle carefully [what happens when iOS puts the app in the background](https://developer.apple.com/library/ios/technotes/tn2277/_index.html). Typically you must stop any network servers while the app is in the background and restart them when the app comes back to the foreground. This can become quite complex considering servers might have ongoing connections when they need to be stopped.
+
+Fortunately, GCDWebServer does all of this automatically for you:
+- GCDWebServer begins a [background task](https://developer.apple.com/library/ios/documentation/iphone/conceptual/iphoneosprogrammingguide/ManagingYourApplicationsFlow/ManagingYourApplicationsFlow.html) whenever the first HTTP connection is opened and ends it only when the last one is closed. This prevents iOS from suspending the app after it goes in the background, which would immediately kill HTTP connections to the client.
+ - While the app is in the background, as long as new HTTP connections keep being initiated, the background task will continue to exist and iOS will not suspend the app (unless under sudden and unexpected memory pressure).
+ - If the app is still in the background when the last HTTP connection is closed, GCDWebServer will suspend itself and stop accepting new connections as if you had called ```-stop``` (this behavior can be disabled with the ```GCDWebServerOption_AutomaticallySuspendInBackground``` option).
+- If the app goes in the background while no HTTP connections are opened, GCDWebServer will immediately suspend itself and stop accepting new connections as if you had called ```-stop``` (this behavior can be disabled with the ```GCDWebServerOption_AutomaticallySuspendInBackground``` option).
+- If the app comes back to the foreground and GCDWebServer had been suspended, it will automatically resume itself and start accepting again new HTTP connections as if you had called ```-start```.
+
+HTTP connections are often initiated in batches (or bursts), for instance when loading a web page with multiple resources. This makes it difficult to accurately detect when the *very last* HTTP connection has been closed: it's possible 2 consecutive HTTP connections part of the same batch would be separated by a small delay instead of overlapping. It would be bad for the client if GCDWebServer suspended itself right in between. The ```GCDWebServerOption_ConnectedStateCoalescingInterval``` option solves this problem elegantly by forcing GCDWebServer to wait some extra delay before performing any action after the last HTTP connection has been closed, just in case a new HTTP connection is initiated within this delay.
 
 Advanced Example 1: Implementing HTTP Redirects
 ===============================================
@@ -306,4 +318,4 @@ Final Example: File Downloads and Uploads From iOS App
 
 GCDWebServer was originally written for the [ComicFlow](http://itunes.apple.com/us/app/comicflow/id409290355?mt=8) comic reader app for iPad. It allow users to connect to their iPad with their web browser over WiFi and then upload, download and organize comic files inside the app.
 
-ComicFlow is [entirely open-source](https://github.com/swisspol/ComicFlow) and you can see how it uses GCDWebUploader in the [WebServer.m](https://github.com/swisspol/ComicFlow/blob/master/Classes/WebServer.m) file.
+ComicFlow is [entirely open-source](https://github.com/swisspol/ComicFlow) and you can see how it uses GCDWebServer in the [WebServer.h](https://github.com/swisspol/ComicFlow/blob/master/Classes/WebServer.h) and [WebServer.m](https://github.com/swisspol/ComicFlow/blob/master/Classes/WebServer.m) files.

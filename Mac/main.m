@@ -130,9 +130,13 @@ int main(int argc, const char* argv[]) {
     BOOL recording = NO;
     NSString* rootDirectory = NSHomeDirectory();
     NSString* testDirectory = nil;
+    NSString* authenticationMethod = nil;
+    NSString* authenticationRealm = nil;
+    NSString* authenticationUser = nil;
+    NSString* authenticationPassword = nil;
     
     if (argc == 1) {
-      fprintf(stdout, "Usage: %s [-mode webServer | htmlPage | htmlForm | webDAV | webUploader | streamingResponse] [-record] [-root directory] [-tests directory]\n\n", basename((char*)argv[0]));
+      fprintf(stdout, "Usage: %s [-mode webServer | htmlPage | htmlForm | webDAV | webUploader | streamingResponse] [-record] [-root directory] [-tests directory] [-authenticationMethod Basic | Digest] [-authenticationRealm realm] [-authenticationUser user] [-authenticationPassword password]\n\n", basename((char*)argv[0]));
     } else {
       for (int i = 1; i < argc; ++i) {
         if (argv[i][0] != '-') {
@@ -161,6 +165,18 @@ int main(int argc, const char* argv[]) {
         } else if (!strcmp(argv[i], "-tests") && (i + 1 < argc)) {
           ++i;
           testDirectory = [[[NSFileManager defaultManager] stringWithFileSystemRepresentation:argv[i] length:strlen(argv[i])] stringByStandardizingPath];
+        } else if (!strcmp(argv[i], "-authenticationMethod") && (i + 1 < argc)) {
+          ++i;
+          authenticationMethod = [NSString stringWithUTF8String:argv[i]];
+        } else if (!strcmp(argv[i], "-authenticationRealm") && (i + 1 < argc)) {
+          ++i;
+          authenticationRealm = [NSString stringWithUTF8String:argv[i]];
+        } else if (!strcmp(argv[i], "-authenticationUser") && (i + 1 < argc)) {
+          ++i;
+          authenticationUser = [NSString stringWithUTF8String:argv[i]];
+        } else if (!strcmp(argv[i], "-authenticationPassword") && (i + 1 < argc)) {
+          ++i;
+          authenticationPassword = [NSString stringWithUTF8String:argv[i]];
         }
       }
     }
@@ -274,14 +290,26 @@ int main(int argc, const char* argv[]) {
       webServer.delegate = delegate;
       if (testDirectory) {
         fprintf(stdout, "<RUNNING TESTS FROM \"%s\">\n\n", [testDirectory UTF8String]);
-        result = (int)[webServer runTestsInDirectory:testDirectory withPort:8080];
+        result = (int)[webServer runTestsWithOptions:@{GCDWebServerOption_Port: @8080} inDirectory:testDirectory];
       } else {
         if (recording) {
           fprintf(stdout, "<RECORDING ENABLED>\n");
           webServer.recordingEnabled = YES;
         }
         fprintf(stdout, "\n");
-        if ([webServer runWithPort:8080]) {
+        NSMutableDictionary* options = [NSMutableDictionary dictionary];
+        [options setObject:@8080 forKey:GCDWebServerOption_Port];
+        [options setObject:@"" forKey:GCDWebServerOption_BonjourName];
+        if (authenticationUser && authenticationPassword) {
+          [options setValue:authenticationRealm forKey:GCDWebServerOption_AuthenticationRealm];
+          [options setObject:@{authenticationUser: authenticationPassword} forKey:GCDWebServerOption_AuthenticationAccounts];
+          if ([authenticationMethod isEqualToString:@"Basic"]) {
+            [options setObject:GCDWebServerAuthenticationMethod_Basic forKey:GCDWebServerOption_AuthenticationMethod];
+          } else if ([authenticationMethod isEqualToString:@"Digest"]) {
+            [options setObject:GCDWebServerAuthenticationMethod_DigestAccess forKey:GCDWebServerOption_AuthenticationMethod];
+          }
+        }
+        if ([webServer runWithOptions:options]) {
           result = 0;
         }
       }

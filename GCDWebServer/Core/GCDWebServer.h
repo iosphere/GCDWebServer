@@ -46,9 +46,18 @@ extern NSString* const GCDWebServerOption_Port;  // NSNumber / NSUInteger (defau
 extern NSString* const GCDWebServerOption_BonjourName;  // NSString (default is empty string i.e. use computer name)
 extern NSString* const GCDWebServerOption_MaxPendingConnections;  // NSNumber / NSUInteger (default is 16)
 extern NSString* const GCDWebServerOption_ServerName;  // NSString (default is server class name)
+extern NSString* const GCDWebServerOption_AuthenticationMethod;  // One of "GCDWebServerAuthenticationMethod_..." (default is nil i.e. no authentication)
+extern NSString* const GCDWebServerOption_AuthenticationRealm;  // NSString (default is server name)
+extern NSString* const GCDWebServerOption_AuthenticationAccounts;  // NSDictionary of username / password (default is nil i.e. no accounts)
 extern NSString* const GCDWebServerOption_ConnectionClass;  // Subclass of GCDWebServerConnection (default is GCDWebServerConnection class)
 extern NSString* const GCDWebServerOption_AutomaticallyMapHEADToGET;  // NSNumber / BOOL (default is YES)
-extern NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval;  // NSNumber / double (default is 1.0 - set to 0.0 to disable coaslescing of -webServerDidConnect: / -webServerDidDisconnect:)
+extern NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval;  // NSNumber / double (default is 1.0 seconds - set to <=0.0 to disable coaslescing of -webServerDidConnect: / -webServerDidDisconnect:)
+#if TARGET_OS_IPHONE
+extern NSString* const GCDWebServerOption_AutomaticallySuspendInBackground;  // NSNumber / BOOL (default is YES)
+#endif
+
+extern NSString* const GCDWebServerAuthenticationMethod_Basic;  // Not recommended as password is sent in clear
+extern NSString* const GCDWebServerAuthenticationMethod_DigestAccess;
 
 @class GCDWebServer;
 
@@ -64,7 +73,7 @@ extern NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval;  // 
 @interface GCDWebServer : NSObject
 @property(nonatomic, assign) id<GCDWebServerDelegate> delegate;
 @property(nonatomic, readonly, getter=isRunning) BOOL running;
-@property(nonatomic, readonly) NSUInteger port;
+@property(nonatomic, readonly) NSUInteger port;  // Only non-zero if running
 @property(nonatomic, readonly) NSString* bonjourName;  // Only non-nil if Bonjour registration is active
 - (instancetype)init;
 - (void)addHandlerWithMatchBlock:(GCDWebServerMatchBlock)matchBlock processBlock:(GCDWebServerProcessBlock)processBlock;
@@ -73,14 +82,15 @@ extern NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval;  // 
 - (BOOL)start;  // Default is port 8080 (OS X & iOS Simulator) or 80 (iOS) and computer / device name for Bonjour
 - (BOOL)startWithPort:(NSUInteger)port bonjourName:(NSString*)name;  // Pass nil name to disable Bonjour or empty string to use computer name
 - (BOOL)startWithOptions:(NSDictionary*)options;
-- (void)stop;
+- (void)stop;  // Does not abort any currently opened connections
 @end
 
 @interface GCDWebServer (Extensions)
 @property(nonatomic, readonly) NSURL* serverURL;  // Only non-nil if server is running
 @property(nonatomic, readonly) NSURL* bonjourServerURL;  // Only non-nil if server is running and Bonjour registration is active
 #if !TARGET_OS_IPHONE
-- (BOOL)runWithPort:(NSUInteger)port;  // Starts then automatically stops on SIGINT i.e. Ctrl-C (use on main thread only)
+- (BOOL)runWithPort:(NSUInteger)port bonjourName:(NSString*)name;
+- (BOOL)runWithOptions:(NSDictionary*)options;  // Starts then automatically stops on SIGINT i.e. Ctrl-C (use on main thread only)
 #endif
 @end
 
@@ -110,7 +120,7 @@ extern NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval;  // 
 
 @interface GCDWebServer (Testing)
 @property(nonatomic, getter=isRecordingEnabled) BOOL recordingEnabled;  // Creates files in the current directory containing the raw data for all requests and responses (directory most NOT contain prior recordings)
-- (NSInteger)runTestsInDirectory:(NSString*)path withPort:(NSUInteger)port;  // Returns number of failed tests or -1 if server failed to start
+- (NSInteger)runTestsWithOptions:(NSDictionary*)options inDirectory:(NSString*)path;  // Returns number of failed tests or -1 if server failed to start
 @end
 
 #endif

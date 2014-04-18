@@ -26,8 +26,10 @@
  */
 
 #import <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#else
 #ifdef __GCDWEBSERVER_ENABLE_TESTING__
-#if !TARGET_OS_IPHONE
 #import <AppKit/AppKit.h>
 #endif
 #endif
@@ -50,13 +52,21 @@
   BOOL _connected;
   CFRunLoopTimerRef _connectedTimer;
   
+  NSDictionary* _options;
   NSString* _serverName;
+  NSString* _authenticationRealm;
+  NSMutableDictionary* _authenticationBasicAccounts;
+  NSMutableDictionary* _authenticationDigestAccounts;
   Class _connectionClass;
   BOOL _mapHEADToGET;
   CFTimeInterval _disconnectDelay;
   NSUInteger _port;
   dispatch_source_t _source;
   CFNetServiceRef _service;
+#if TARGET_OS_IPHONE
+  BOOL _suspendInBackground;
+  UIBackgroundTaskIdentifier _backgroundTask;
+#endif
 #ifdef __GCDWEBSERVER_ENABLE_TESTING__
   BOOL _recording;
 #endif
@@ -74,9 +84,18 @@ NSString* const GCDWebServerOption_Port = @"Port";
 NSString* const GCDWebServerOption_BonjourName = @"BonjourName";
 NSString* const GCDWebServerOption_MaxPendingConnections = @"MaxPendingConnections";
 NSString* const GCDWebServerOption_ServerName = @"ServerName";
+NSString* const GCDWebServerOption_AuthenticationMethod = @"AuthenticationMethod";
+NSString* const GCDWebServerOption_AuthenticationRealm = @"AuthenticationRealm";
+NSString* const GCDWebServerOption_AuthenticationAccounts = @"AuthenticationAccounts";
 NSString* const GCDWebServerOption_ConnectionClass = @"ConnectionClass";
 NSString* const GCDWebServerOption_AutomaticallyMapHEADToGET = @"AutomaticallyMapHEADToGET";
 NSString* const GCDWebServerOption_ConnectedStateCoalescingInterval = @"ConnectedStateCoalescingInterval";
+#if TARGET_OS_IPHONE
+NSString* const GCDWebServerOption_AutomaticallySuspendInBackground = @"AutomaticallySuspendInBackground";
+#endif
+
+NSString* const GCDWebServerAuthenticationMethod_Basic = @"Basic";
+NSString* const GCDWebServerAuthenticationMethod_DigestAccess = @"DigestAccess";
 
 #ifndef __GCDWEBSERVER_LOGGING_HEADER__
 #ifdef NDEBUG
@@ -136,7 +155,9 @@ static void _SignalHandler(int signal) {
 
 @implementation GCDWebServer
 
-@synthesize delegate=_delegate, handlers=_handlers, port=_port, serverName=_serverName, shouldAutomaticallyMapHEADToGET=_mapHEADToGET;
+@synthesize delegate=_delegate, handlers=_handlers, port=_port, serverName=_serverName, authenticationRealm=_authenticationRealm,
+            authenticationBasicAccounts=_authenticationBasicAccounts, authenticationDigestAccounts=_authenticationDigestAccounts,
+            shouldAutomaticallyMapHEADToGET=_mapHEADToGET;
 
 #ifndef __GCDWEBSERVER_LOGGING_HEADER__
 
@@ -166,6 +187,9 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
     CFRunLoopTimerContext context = {0, (ARC_BRIDGE void*)self, NULL, NULL, NULL};
     _connectedTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, HUGE_VAL, HUGE_VAL, 0, 0, _ConnectedTimerCallBack, &context);
     CFRunLoopAddTimer(CFRunLoopGetMain(), _connectedTimer, kCFRunLoopCommonModes);
+#if TARGET_OS_IPHONE
+    _backgroundTask = UIBackgroundTaskInvalid;
+#endif
   }
   return self;
 }
@@ -175,7 +199,7 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
   DCHECK(_activeConnections == 0);
   
   _delegate = nil;
-  if (_source) {
+  if (_options) {
     [self stop];
   }
   
@@ -187,16 +211,42 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
   ARC_DEALLOC(super);
 }
 
+#if TARGET_OS_IPHONE
+
+// Always called on main thread
+- (void)_startBackgroundTask {
+  DCHECK([NSThread isMainThread]);
+  if (_backgroundTask == UIBackgroundTaskInvalid) {
+    LOG_DEBUG(@"Did start background task");
+    _backgroundTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+      
+      LOG_WARNING(@"Application is being suspended while %@ is still connected", [self class]);
+      [self _endBackgroundTask];
+      
+    }];
+  } else {
+    DNOT_REACHED();
+  }
+}
+
+#endif
+
+// Always called on main thread
 - (void)_didConnect {
+  DCHECK([NSThread isMainThread]);
   DCHECK(_connected == NO);
   _connected = YES;
   LOG_DEBUG(@"Did connect");
+  
+#if TARGET_OS_IPHONE
+  [self _startBackgroundTask];
+#endif
+  
   if ([_delegate respondsToSelector:@selector(webServerDidConnect:)]) {
     [_delegate webServerDidConnect:self];
   }
 }
 
-// Called from any thread
 - (void)willStartConnection:(GCDWebServerConnection*)connection {
   dispatch_sync(_syncQueue, ^{
     
@@ -216,16 +266,41 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
   });
 }
 
+#if TARGET_OS_IPHONE
+
+// Always called on main thread
+- (void)_endBackgroundTask {
+  DCHECK([NSThread isMainThread]);
+  if (_backgroundTask != UIBackgroundTaskInvalid) {
+    if (_suspendInBackground && ([[UIApplication sharedApplication] applicationState] == UIApplicationStateBackground) && _source) {
+      [self _stop];
+    }
+    [[UIApplication sharedApplication] endBackgroundTask:_backgroundTask];
+    _backgroundTask = UIBackgroundTaskInvalid;
+    LOG_DEBUG(@"Did end background task");
+  } else {
+    DNOT_REACHED();
+  }
+}
+
+#endif
+
+// Always called on main thread
 - (void)_didDisconnect {
+  DCHECK([NSThread isMainThread]);
   DCHECK(_connected == YES);
   _connected = NO;
   LOG_DEBUG(@"Did disconnect");
+  
+#if TARGET_OS_IPHONE
+  [self _endBackgroundTask];
+#endif
+  
   if ([_delegate respondsToSelector:@selector(webServerDidDisconnect:)]) {
     [_delegate webServerDidDisconnect:self];
   }
 }
 
-// Called from any thread
 - (void)didEndConnection:(GCDWebServerConnection*)connection {
   dispatch_sync(_syncQueue, ^{
     DCHECK(_activeConnections > 0);
@@ -248,19 +323,15 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
 }
 
 - (void)addHandlerWithMatchBlock:(GCDWebServerMatchBlock)matchBlock processBlock:(GCDWebServerProcessBlock)handlerBlock {
-  DCHECK(_source == NULL);
+  DCHECK(_options == nil);
   GCDWebServerHandler* handler = [[GCDWebServerHandler alloc] initWithMatchBlock:matchBlock processBlock:handlerBlock];
   [_handlers insertObject:handler atIndex:0];
   ARC_RELEASE(handler);
 }
 
 - (void)removeAllHandlers {
-  DCHECK(_source == NULL);
+  DCHECK(_options == nil);
   [_handlers removeAllObjects];
-}
-
-- (BOOL)start {
-  return [self startWithPort:kDefaultPort bonjourName:@""];
 }
 
 static void _NetServiceClientCallBack(CFNetServiceRef service, CFStreamError* error, void* info) {
@@ -274,23 +345,25 @@ static void _NetServiceClientCallBack(CFNetServiceRef service, CFStreamError* er
   }
 }
 
-- (BOOL)startWithPort:(NSUInteger)port bonjourName:(NSString*)name {
-  NSMutableDictionary* options = [NSMutableDictionary dictionary];
-  [options setObject:[NSNumber numberWithInteger:port] forKey:GCDWebServerOption_Port];
-  [options setValue:name forKey:GCDWebServerOption_BonjourName];
-  return [self startWithOptions:options];
-}
-
 static inline id _GetOption(NSDictionary* options, NSString* key, id defaultValue) {
   id value = [options objectForKey:key];
   return value ? value : defaultValue;
 }
 
-- (BOOL)startWithOptions:(NSDictionary*)options {
+static inline NSString* _EncodeBase64(NSString* string) {
+  NSData* data = [string dataUsingEncoding:NSUTF8StringEncoding];
+#if (TARGET_OS_IPHONE && !(__IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_7_0)) || (!TARGET_OS_IPHONE && !(__MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9))
+  if (![data respondsToSelector:@selector(base64EncodedDataWithOptions:)]) {
+    return [data base64Encoding];
+  }
+#endif
+  return ARC_AUTORELEASE([[NSString alloc] initWithData:[data base64EncodedDataWithOptions:0] encoding:NSASCIIStringEncoding]);
+}
+- (BOOL)_start {
   DCHECK(_source == NULL);
-  NSUInteger port = [_GetOption(options, GCDWebServerOption_Port, [NSNumber numberWithUnsignedInteger:0]) unsignedIntegerValue];
-  NSString* name = _GetOption(options, GCDWebServerOption_BonjourName, @"");
-  NSUInteger maxPendingConnections = [_GetOption(options, GCDWebServerOption_MaxPendingConnections, [NSNumber numberWithUnsignedInteger:16]) unsignedIntegerValue];
+  NSUInteger port = [_GetOption(_options, GCDWebServerOption_Port, @0) unsignedIntegerValue];
+  NSString* name = _GetOption(_options, GCDWebServerOption_BonjourName, @"");
+  NSUInteger maxPendingConnections = [_GetOption(_options, GCDWebServerOption_MaxPendingConnections, @16) unsignedIntegerValue];
   int listeningSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (listeningSocket > 0) {
     int yes = 1;
@@ -305,10 +378,26 @@ static inline id _GetOption(NSDictionary* options, NSString* key, id defaultValu
     if (bind(listeningSocket, (void*)&addr4, sizeof(addr4)) == 0) {
       if (listen(listeningSocket, (int)maxPendingConnections) == 0) {
         LOG_DEBUG(@"Did open listening socket %i", listeningSocket);
-        _serverName = [_GetOption(options, GCDWebServerOption_ServerName, NSStringFromClass([self class])) copy];
-        _connectionClass = _GetOption(options, GCDWebServerOption_ConnectionClass, [GCDWebServerConnection class]);
-        _mapHEADToGET = [_GetOption(options, GCDWebServerOption_AutomaticallyMapHEADToGET, [NSNumber numberWithBool:YES]) boolValue];
-        _disconnectDelay = [_GetOption(options, GCDWebServerOption_ConnectedStateCoalescingInterval, [NSNumber numberWithDouble:1.0]) doubleValue];
+        _serverName = [_GetOption(_options, GCDWebServerOption_ServerName, NSStringFromClass([self class])) copy];
+        NSString* authenticationMethod = _GetOption(_options, GCDWebServerOption_AuthenticationMethod, nil);
+        if ([authenticationMethod isEqualToString:GCDWebServerAuthenticationMethod_Basic]) {
+          _authenticationRealm = [_GetOption(_options, GCDWebServerOption_AuthenticationRealm, _serverName) copy];
+          _authenticationBasicAccounts = [[NSMutableDictionary alloc] init];
+          NSDictionary* accounts = _GetOption(_options, GCDWebServerOption_AuthenticationAccounts, @{});
+          [accounts enumerateKeysAndObjectsUsingBlock:^(NSString* username, NSString* password, BOOL* stop) {
+            [_authenticationBasicAccounts setObject:_EncodeBase64([NSString stringWithFormat:@"%@:%@", username, password]) forKey:username];
+          }];
+        } else if ([authenticationMethod isEqualToString:GCDWebServerAuthenticationMethod_DigestAccess]) {
+          _authenticationRealm = [_GetOption(_options, GCDWebServerOption_AuthenticationRealm, _serverName) copy];
+          _authenticationDigestAccounts = [[NSMutableDictionary alloc] init];
+          NSDictionary* accounts = _GetOption(_options, GCDWebServerOption_AuthenticationAccounts, @{});
+          [accounts enumerateKeysAndObjectsUsingBlock:^(NSString* username, NSString* password, BOOL* stop) {
+            [_authenticationDigestAccounts setObject:GCDWebServerComputeMD5Digest(@"%@:%@:%@", username, _authenticationRealm, password) forKey:username];
+          }];
+        }
+        _connectionClass = _GetOption(_options, GCDWebServerOption_ConnectionClass, [GCDWebServerConnection class]);
+        _mapHEADToGET = [_GetOption(_options, GCDWebServerOption_AutomaticallyMapHEADToGET, @YES) boolValue];
+        _disconnectDelay = [_GetOption(_options, GCDWebServerOption_ConnectedStateCoalescingInterval, @1.0) doubleValue];
         _source = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, listeningSocket, 0, kGCDWebServerGCDQueue);
         dispatch_source_set_cancel_handler(_source, ^{
           
@@ -403,34 +492,115 @@ static inline id _GetOption(NSDictionary* options, NSString* key, id defaultValu
   return (_source ? YES : NO);
 }
 
+- (void)_stop {
+  DCHECK(_source != NULL);
+  
+  if (_service) {
+    CFNetServiceUnscheduleFromRunLoop(_service, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+    CFNetServiceSetClient(_service, NULL, NULL);
+    CFRelease(_service);
+    _service = NULL;
+  }
+  
+  dispatch_source_cancel(_source);  // This will close the socket
+  ARC_DISPATCH_RELEASE(_source);
+  _source = NULL;
+  _port = 0;
+  
+  ARC_RELEASE(_serverName);
+  _serverName = nil;
+  ARC_RELEASE(_authenticationRealm);
+  _authenticationRealm = nil;
+  ARC_RELEASE(_authenticationBasicAccounts);
+  _authenticationBasicAccounts = nil;
+  ARC_RELEASE(_authenticationDigestAccounts);
+  _authenticationDigestAccounts = nil;
+  
+  LOG_INFO(@"%@ stopped", [self class]);
+  if ([_delegate respondsToSelector:@selector(webServerDidStop:)]) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [_delegate webServerDidStop:self];
+    });
+  }
+}
+
+- (BOOL)start {
+  return [self startWithPort:kDefaultPort bonjourName:@""];
+}
+
+- (BOOL)startWithPort:(NSUInteger)port bonjourName:(NSString*)name {
+  NSMutableDictionary* options = [NSMutableDictionary dictionary];
+  [options setObject:[NSNumber numberWithInteger:port] forKey:GCDWebServerOption_Port];
+  [options setValue:name forKey:GCDWebServerOption_BonjourName];
+  return [self startWithOptions:options];
+}
+
+#if TARGET_OS_IPHONE
+
+- (void)_didEnterBackground:(NSNotification*)notification {
+  DCHECK([NSThread isMainThread]);
+  LOG_DEBUG(@"Did enter background");
+  if ((_backgroundTask == UIBackgroundTaskInvalid) && _source) {
+    [self _stop];
+  }
+}
+
+- (void)_willEnterForeground:(NSNotification*)notification {
+  DCHECK([NSThread isMainThread]);
+  LOG_DEBUG(@"Will enter foreground");
+  if (!_source) {
+    [self _start];  // TODO: There's probably nothing we can do on failure
+  }
+}
+
+#endif
+
+- (BOOL)startWithOptions:(NSDictionary*)options {
+  if (_options == nil) {
+    _options = [options copy];
+#if TARGET_OS_IPHONE
+    _suspendInBackground = [_GetOption(_options, GCDWebServerOption_AutomaticallySuspendInBackground, @YES) boolValue];
+    if (((_suspendInBackground == NO) || ([[UIApplication sharedApplication] applicationState] != UIApplicationStateBackground)) && ![self _start])
+#else
+    if (![self _start])
+#endif
+    {
+      ARC_RELEASE(_options);
+      _options = nil;
+      return NO;
+    }
+#if TARGET_OS_IPHONE
+    if (_suspendInBackground) {
+      [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_didEnterBackground:) name:UIApplicationDidEnterBackgroundNotification object:nil];
+      [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_willEnterForeground:) name:UIApplicationWillEnterForegroundNotification object:nil];
+    }
+#endif
+    return YES;
+  } else {
+    DNOT_REACHED();
+  }
+  return NO;
+}
+
 - (BOOL)isRunning {
   return (_source ? YES : NO);
 }
 
 - (void)stop {
-  DCHECK(_source != NULL);
-  if (_source) {
-    if (_service) {
-      CFNetServiceUnscheduleFromRunLoop(_service, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-      CFNetServiceSetClient(_service, NULL, NULL);
-      CFRelease(_service);
-      _service = NULL;
+  if (_options) {
+#if TARGET_OS_IPHONE
+    if (_suspendInBackground) {
+      [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+      [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationWillEnterForegroundNotification object:nil];
     }
-    
-    dispatch_source_cancel(_source);  // This will close the socket
-    ARC_DISPATCH_RELEASE(_source);
-    _source = NULL;
-    _port = 0;
-    
-    ARC_RELEASE(_serverName);
-    _serverName = nil;
-    
-    LOG_INFO(@"%@ stopped", [self class]);
-    if ([_delegate respondsToSelector:@selector(webServerDidStop:)]) {
-      dispatch_async(dispatch_get_main_queue(), ^{
-        [_delegate webServerDidStop:self];
-      });
+#endif
+    if (_source) {
+      [self _stop];
     }
+    ARC_RELEASE(_options);
+    _options = nil;
+  } else {
+    DNOT_REACHED();
   }
 }
 
@@ -468,13 +638,20 @@ static inline id _GetOption(NSDictionary* options, NSString* key, id defaultValu
 
 #if !TARGET_OS_IPHONE
 
-- (BOOL)runWithPort:(NSUInteger)port {
+- (BOOL)runWithPort:(NSUInteger)port bonjourName:(NSString*)name {
+  NSMutableDictionary* options = [NSMutableDictionary dictionary];
+  [options setObject:[NSNumber numberWithInteger:port] forKey:GCDWebServerOption_Port];
+  [options setValue:name forKey:GCDWebServerOption_BonjourName];
+  return [self runWithOptions:options];
+}
+
+- (BOOL)runWithOptions:(NSDictionary*)options {
   DCHECK([NSThread isMainThread]);
   BOOL success = NO;
   _run = YES;
   void (*handler)(int) = signal(SIGINT, _SignalHandler);
   if (handler != SIG_ERR) {
-    if ([self startWithPort:port bonjourName:@""]) {
+    if ([self startWithOptions:options]) {
       while (_run) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, true);
       }
@@ -771,10 +948,10 @@ static void _LogResult(NSString* format, ...) {
   ARC_RELEASE(message);
 }
 
-- (NSInteger)runTestsInDirectory:(NSString*)path withPort:(NSUInteger)port {
+- (NSInteger)runTestsWithOptions:(NSDictionary*)options inDirectory:(NSString*)path {
   NSArray* ignoredHeaders = @[@"Date", @"Etag"];  // Dates are always different by definition and ETags depend on file system node IDs
   NSInteger result = -1;
-  if ([self startWithPort:port bonjourName:nil]) {
+  if ([self startWithOptions:options]) {
     
     result = 0;
     NSArray* files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:NULL];
@@ -799,7 +976,7 @@ static void _LogResult(NSString* format, ...) {
                 if (responseData) {
                 CFHTTPMessageRef expectedResponse = _CreateHTTPMessageFromData(responseData, NO);
                   if (expectedResponse) {
-                    CFHTTPMessageRef actualResponse = _CreateHTTPMessageFromPerformingRequest(requestData, port);
+                    CFHTTPMessageRef actualResponse = _CreateHTTPMessageFromPerformingRequest(requestData, self.port);
                     if (actualResponse) {
                       success = YES;
                       
