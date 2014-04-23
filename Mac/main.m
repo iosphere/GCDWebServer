@@ -33,7 +33,7 @@
 #import "GCDWebServerURLEncodedFormRequest.h"
 
 #import "GCDWebServerDataResponse.h"
-#import "GCDWebServerStreamingResponse.h"
+#import "GCDWebServerStreamedResponse.h"
 
 #import "GCDWebDAVServer.h"
 
@@ -62,6 +62,10 @@ typedef enum {
 }
 
 - (void)webServerDidStart:(GCDWebServer*)server {
+  [self _logDelegateCall:_cmd];
+}
+
+- (void)webServerDidCompleteBonjourRegistration:(GCDWebServer*)server {
   [self _logDelegateCall:_cmd];
 }
 
@@ -263,7 +267,7 @@ int main(int argc, const char* argv[]) {
                           processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
           
           __block int countDown = 10;
-          return [GCDWebServerStreamingResponse responseWithContentType:@"text/plain" streamBlock:^NSData *(NSError** error) {
+          return [GCDWebServerStreamedResponse responseWithContentType:@"text/plain" streamBlock:^NSData *(NSError** error) {
             
             usleep(100 * 1000);
             if (countDown) {

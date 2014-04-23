@@ -335,12 +335,16 @@ static void _ConnectedTimerCallBack(CFRunLoopTimerRef timer, void* info) {
 }
 
 static void _NetServiceClientCallBack(CFNetServiceRef service, CFStreamError* error, void* info) {
+  DCHECK([NSThread isMainThread]);
   @autoreleasepool {
     if (error->error) {
       LOG_ERROR(@"Bonjour error %i (domain %i)", (int)error->error, (int)error->domain);
     } else {
       GCDWebServer* server = (ARC_BRIDGE GCDWebServer*)info;
       LOG_INFO(@"%@ now reachable at %@", [server class], server.bonjourServerURL);
+      if ([server.delegate respondsToSelector:@selector(webServerDidCompleteBonjourRegistration:)]) {
+        [server.delegate webServerDidCompleteBonjourRegistration:server];
+      }
     }
   }
 }
@@ -722,10 +726,10 @@ static inline NSString* _EncodeBase64(NSString* string) {
 @implementation GCDWebServer (GETHandlers)
 
 - (void)addGETHandlerForPath:(NSString*)path staticData:(NSData*)staticData contentType:(NSString*)contentType cacheAge:(NSUInteger)cacheAge {
-  GCDWebServerResponse* response = [GCDWebServerDataResponse responseWithData:staticData contentType:contentType];
-  response.cacheControlMaxAge = cacheAge;
   [self addHandlerForMethod:@"GET" path:path requestClass:[GCDWebServerRequest class] processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
     
+    GCDWebServerResponse* response = [GCDWebServerDataResponse responseWithData:staticData contentType:contentType];
+    response.cacheControlMaxAge = cacheAge;
     return response;
     
   }];
@@ -865,6 +869,10 @@ static inline NSString* _EncodeBase64(NSString* string) {
   va_start(arguments, format);
   LOG_ERROR(@"%@", ARC_AUTORELEASE([[NSString alloc] initWithFormat:format arguments:arguments]));
   va_end(arguments);
+}
+
+- (void)logException:(NSException*)exception {
+  LOG_EXCEPTION(exception);
 }
 
 @end

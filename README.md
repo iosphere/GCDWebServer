@@ -4,9 +4,9 @@ Overview
 [![Build Status](https://travis-ci.org/swisspol/GCDWebServer.svg?branch=master)](https://travis-ci.org/swisspol/GCDWebServer)
 
 GCDWebServer is a modern and lightweight GCD based HTTP 1.1 server designed to be embedded in OS X & iOS apps. It was written from scratch with the following goals in mind:
-* Easy to use and understand architecture with only 4 core classes: server, connection, request and response (see "Understanding GCDWebServer's Architecture" below)
-* Well designed API for easy integration and customization
-* Entirely built with an event-driven design using [Grand Central Dispatch](http://en.wikipedia.org/wiki/Grand_Central_Dispatch) for maximal performance and concurrency
+* Elegant and easy to use architecture with only 4 core classes: server, connection, request and response (see "Understanding GCDWebServer's Architecture" below)
+* Well designed API with fully documented headers for easy integration and customization
+* Entirely built with an event-driven design using [Grand Central Dispatch](http://en.wikipedia.org/wiki/Grand_Central_Dispatch) for best performance and concurrency
 * No dependencies on third-party source code
 * Available under a friendly [New BSD License](LICENSE)
 
@@ -58,6 +58,7 @@ These code snippets show how to implement a custom HTTP server that runs on port
 **OS X version (command line tool):**
 ```objectivec
 #import "GCDWebServer.h"
+#import "GCDWebServerDataResponse.h"
 
 int main(int argc, const char* argv[]) {
   @autoreleasepool {
@@ -75,10 +76,7 @@ int main(int argc, const char* argv[]) {
     }];
     
     // Use convenience method that runs server on port 8080 until SIGINT received (i.e. Ctrl-C in Terminal)
-    [webServer runWithPort:8080];
-    
-    // Destroy server (unnecessary if using ARC)
-    [webServer release];
+    [webServer runWithPort:8080 bonjourName:nil];
     
   }
   return 0;
@@ -88,6 +86,7 @@ int main(int argc, const char* argv[]) {
 **iOS version:**
 ```objectivec
 #import "GCDWebServer.h"
+#import "GCDWebServerDataResponse.h"
 
 static GCDWebServer* _webServer = nil;  // This should really be an ivar of your application's delegate class
 
@@ -170,7 +169,6 @@ int main(int argc, const char* argv[]) {
     GCDWebServer* webServer = [[GCDWebServer alloc] init];
     [webServer addGETHandlerForBasePath:@"/" directoryPath:NSHomeDirectory() indexFilename:nil cacheAge:3600 allowRangeRequests:YES];
     [webServer runWithPort:8080];
-    [webServer release];  // Remove if using ARC
     
   }
   return 0;
