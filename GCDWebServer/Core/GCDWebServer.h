@@ -233,6 +233,10 @@ extern NSString* const GCDWebServerAuthenticationMethod_DigestAccess;
  *  then passes each one to a "handler" capable of generating an HTTP response
  *  for it, which is then sent back to the client.
  *
+ *  GCDWebServer instances can be created and used from any thread but it's
+ *  recommended to have the main thread's runloop be running so internal callbacks
+ *  can be handled e.g. for Bonjour registration.
+ *
  *  See the README.md file for more information about the architecture of GCDWebServer.
  */
 @interface GCDWebServer : NSObject
@@ -285,29 +289,12 @@ extern NSString* const GCDWebServerAuthenticationMethod_DigestAccess;
 - (void)removeAllHandlers;
 
 /**
- *  Starts the server on port 8080 (OS X & iOS Simulator) or port 80 (iOS)
- *  using the computer / device name for as the Bonjour name.
- *
- *  Returns NO if the server failed to start.
- */
-- (BOOL)start;
-
-/**
- *  Starts the server on a given port and with a specific Bonjour name.
- *  Pass a nil Bonjour name to disable Bonjour entirely or an empty string to
- *  use the computer / device name.
- *
- *  Returns NO if the server failed to start.
- */
-- (BOOL)startWithPort:(NSUInteger)port bonjourName:(NSString*)name;
-
-/**
  *  Starts the server with explicit options. This method is the designated way
  *  to start the server.
  *
- *  Returns NO if the server failed to start.
+ *  Returns NO if the server failed to start and sets "error" argument if not NULL.
  */
-- (BOOL)startWithOptions:(NSDictionary*)options;
+- (BOOL)startWithOptions:(NSDictionary*)options error:(NSError**)error;
 
 /**
  *  Stops the server and prevents it to accepts new HTTP requests.
@@ -337,6 +324,23 @@ extern NSString* const GCDWebServerAuthenticationMethod_DigestAccess;
  */
 @property(nonatomic, readonly) NSURL* bonjourServerURL;
 
+/**
+ *  Starts the server on port 8080 (OS X & iOS Simulator) or port 80 (iOS)
+ *  using the computer / device name for as the Bonjour name.
+ *
+ *  Returns NO if the server failed to start.
+ */
+- (BOOL)start;
+
+/**
+ *  Starts the server on a given port and with a specific Bonjour name.
+ *  Pass a nil Bonjour name to disable Bonjour entirely or an empty string to
+ *  use the computer / device name.
+ *
+ *  Returns NO if the server failed to start.
+ */
+- (BOOL)startWithPort:(NSUInteger)port bonjourName:(NSString*)name;
+
 #if !TARGET_OS_IPHONE
 
 /**
@@ -351,15 +355,15 @@ extern NSString* const GCDWebServerAuthenticationMethod_DigestAccess;
 - (BOOL)runWithPort:(NSUInteger)port bonjourName:(NSString*)name;
 
 /**
- *  Runs the server synchronously using -startWithOptions: until a SIGINT signal
- *  is received i.e. Ctrl-C. This method is intended to be used by command line
- *  tools.
+ *  Runs the server synchronously using -startWithOptions: until a SIGTERM or
+ *  SIGINT signal is received i.e. Ctrl-C in Terminal. This method is intended to
+ *  be used by command line tools.
  *
- *  Returns NO if the server failed to start.
+ *  Returns NO if the server failed to start and sets "error" argument if not NULL.
  *
  *  @warning This method must be used from the main thread only.
  */
-- (BOOL)runWithOptions:(NSDictionary*)options;
+- (BOOL)runWithOptions:(NSDictionary*)options error:(NSError**)error;
 
 #endif
 
