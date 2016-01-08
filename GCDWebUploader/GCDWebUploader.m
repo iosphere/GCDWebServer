@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2014, Pierre-Olivier Latour
+ Copyright (c) 2012-2015, Pierre-Olivier Latour
  All rights reserved.
  
  Redistribution and use in source and binary forms, with or without
@@ -24,6 +24,10 @@
  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#if !__has_feature(objc_arc)
+#error GCDWebUploader requires ARC
+#endif
 
 #import <TargetConditionals.h>
 #if TARGET_OS_IPHONE
@@ -288,21 +292,16 @@
 @synthesize uploadDirectory=_uploadDirectory, allowedFileExtensions=_allowedExtensions, allowHiddenItems=_allowHidden,
             title=_title, header=_header, prologue=_prologue, epilogue=_epilogue, footer=_footer;
 
+@dynamic delegate;
+
 - (instancetype)initWithUploadDirectory:(NSString*)path {
   if ((self = [super init])) {
-    NSBundle* siteBundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"GCDWebUploader" ofType:@"bundle"]];
+    NSBundle* siteBundle = [NSBundle bundleWithPath:[[NSBundle bundleForClass:[GCDWebUploader class]] pathForResource:@"GCDWebUploader" ofType:@"bundle"]];
     if (siteBundle == nil) {
-#if !__has_feature(objc_arc)
-      [self release];
-#endif
       return nil;
     }
     _uploadDirectory = [[path stringByStandardizingPath] copy];
-#if __has_feature(objc_arc)
     GCDWebUploader* __unsafe_unretained server = self;
-#else
-    __block GCDWebUploader* server = self;
-#endif
     
     // Resource files
     [self addGETHandlerForBasePath:@"/" directoryPath:[siteBundle resourcePath] indexFilename:nil cacheAge:3600 allowRangeRequests:NO];
@@ -313,11 +312,7 @@
 #if TARGET_OS_IPHONE
       NSString* device = [[UIDevice currentDevice] name];
 #else
-#if __has_feature(objc_arc)
       NSString* device = CFBridgingRelease(SCDynamicStoreCopyComputerName(NULL, NULL));
-#else
-      NSString* device = [(id)SCDynamicStoreCopyComputerName(NULL, NULL) autorelease];
-#endif
 #endif
       NSString* title = server.title;
       if (title == nil) {
@@ -400,22 +395,6 @@
   }
   return self;
 }
-
-#if !__has_feature(objc_arc)
-
-- (void)dealloc {
-  [_uploadDirectory release];
-  [_allowedExtensions release];
-  [_title release];
-  [_header release];
-  [_prologue release];
-  [_epilogue release];
-  [_footer release];
-  
-  [super dealloc];
-}
-
-#endif
 
 @end
 
