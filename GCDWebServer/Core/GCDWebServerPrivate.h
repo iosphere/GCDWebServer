@@ -48,7 +48,6 @@
 #import "GCDWebServerFileResponse.h"
 #import "GCDWebServerStreamedResponse.h"
 
-NS_ASSUME_NONNULL_BEGIN
 
 /**
  *  Check if a custom logging facility should be used instead.
@@ -60,6 +59,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 #import __GCDWEBSERVER_LOGGING_HEADER__
 
+NS_ASSUME_NONNULL_BEGIN
 /**
  *  Automatically detect if XLFacility is available and if so use it as a
  *  logging facility.
